@@ -193,13 +193,13 @@ int main()
         return 1;
     }
 
-    const char* query_list[3] = { "hello1", "hello2", "hello3" };
-    for (size_t i = 0; i < 3; ++i) {
+    const char* query_list[4] = { "hello1", "hello2", "hello3", "hello4"};
+    for (size_t i = 0; i < 4; ++i) {
         int err = sendReq(ConnectSocket, query_list[i]);
         if (err != 0)
             return 1;
     }
-    for (size_t i = 0; i < 3; ++i) 
+    for (size_t i = 0; i < 4; ++i) 
     {
         int err = readRes(ConnectSocket);
         if (err != 0)

@@ -23,6 +23,7 @@ struct Conn
 	SOCKET socket = INVALID_SOCKET;
 	unsigned int state = 0;
 	int rbuf_size = 0;
+	int rbuf_processed = 0;
 	char rbuf[4 + k_max_msg];
 	int wbuf_size = 0;
 	int wbuf_sent = 0;
@@ -65,7 +66,6 @@ static void connPut(std::vector<Conn*>& conns, struct Conn* conn)
 
 static int32_t acceptNewConn(std::vector<Conn*>& conns, SOCKET socket) 
 {
-	// accept
 	struct sockaddr_in client_addr = {};
 	socklen_t socklen = sizeof(client_addr);
 	SOCKET accepted_socket = accept(socket, (struct sockaddr*)&client_addr, &socklen);
@@ -96,6 +96,7 @@ static int32_t acceptNewConn(std::vector<Conn*>& conns, SOCKET socket)
 	conn->socket = accepted_socket;
 	conn->state = STATE_REQ;
 	conn->rbuf_size = 0;
+	conn->rbuf_processed = 0;
 	conn->wbuf_size = 0;
 	conn->wbuf_sent = 0;
 	connPut(conns, conn);
@@ -145,33 +146,29 @@ static bool tryOneRequest(Conn* conn)
 	if (conn->rbuf_size < 4)
 		return false;
 
+	if (conn->rbuf_processed >= conn->rbuf_size)
+		return false;
+
 	unsigned int len = 0;
-	memcpy(&len, &conn->rbuf[0], 4);
+	memcpy(&len, &conn->rbuf[conn->rbuf_processed], 4);
 	if (len > k_max_msg) 
 	{
 		printf("Message too long\n");
 		conn->state = STATE_END;
 		return false;
 	}
-	if (4 + len > conn->rbuf_size) 
+	if (4 + len > (conn->rbuf_size - conn->rbuf_processed))
 		return false;
 
 	//do something with request
-	printf("client says: %.*s\n", len, &conn->rbuf[4]);
+	printf("client says: %.*s\n", len, &conn->rbuf[conn->rbuf_processed+4]);
 
 	// generating echoing response
 	memcpy(&conn->wbuf[0], &len, 4);
-	memcpy(&conn->wbuf[4], &conn->rbuf[4], len);
+	memcpy(&conn->wbuf[4], &conn->rbuf[conn->rbuf_processed+4], len);
 	conn->wbuf_size = 4 + len;
 
-	// remove the request from the buffer.
-	// frequent memmove is inefficient, should be changed to diffrent solution
-	size_t remain = conn->rbuf_size - 4 - len;
-	if (remain) 
-	{
-		memmove(conn->rbuf, &conn->rbuf[4 + len], remain);
-	}
-	conn->rbuf_size = remain;
+	conn->rbuf_processed += 4 + len;
 
 	conn->state = STATE_RES;
 	stateRes(conn);
@@ -186,6 +183,15 @@ static bool tryFillBuffer(Conn* conn)
 		printf("Not enough space in recive buffer\n");
 		return false;
 	}
+
+	// remove the requests from the buffer.
+	size_t remain = conn->rbuf_size - conn->rbuf_processed;
+	if (remain)
+	{
+		memmove(conn->rbuf, &conn->rbuf[conn->rbuf_processed], remain);
+	}
+	conn->rbuf_size = remain;
+	conn->rbuf_processed = 0;
 
 	int rv = 0;
 	size_t cap = sizeof(conn->rbuf) - conn->rbuf_size;

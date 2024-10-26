@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <vector>
+#include <string>
+#include <map>
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -10,6 +12,7 @@
 #define DEFAULT_BUFLEN 512
 
 const int k_max_msg = 4096;
+const int k_max_args = 1024;
 
 enum 
 {
@@ -17,6 +20,15 @@ enum
 	STATE_RES = 1,
 	STATE_END = 2,
 };
+
+enum 
+{
+	RES_OK = 0,
+	RES_ERR = 1,
+	RES_NX = 2,
+};
+
+static std::map<std::string, std::string> g_map;
 
 struct Conn 
 {
@@ -103,6 +115,112 @@ static int32_t acceptNewConn(std::vector<Conn*>& conns, SOCKET socket)
 	return 0;
 }
 
+static unsigned int doGet(const std::vector<std::string>& cmd, char* res, unsigned int* reslen)
+{
+	if (!g_map.count(cmd[1])) 
+	{
+		return RES_NX;
+	}
+	std::string& val = g_map[cmd[1]];
+	if(val.size() > k_max_msg)
+	{
+		return RES_NX;
+	}
+	memcpy(res, val.data(), val.size());
+	*reslen = (unsigned int)val.size();
+	return RES_OK;
+}
+
+static unsigned int doSet(const std::vector<std::string>& cmd, char* res, unsigned int* reslen)
+{
+	(void)res;
+	(void)reslen;
+	g_map[cmd[1]] = cmd[2];
+	return RES_OK;
+}
+
+static unsigned int doDel(const std::vector<std::string>& cmd, char* res, unsigned int* reslen)
+{
+	(void)res;
+	(void)reslen;
+	g_map.erase(cmd[1]);
+	return RES_OK;
+}
+
+static bool cmdIs(const std::string& word, const char* cmd) 
+{
+	return strcmp(word.c_str(), cmd) == 0;
+}
+
+static int parseReq(const char* data, size_t len, std::vector<std::string>& out)
+{
+	if (len < 4) 
+	{
+		return -1;
+	}
+	unsigned int n = 0;
+	memcpy(&n, &data[0], 4);
+	if (n > k_max_args) 
+	{
+		return -1;
+	}
+
+	size_t pos = 4;
+	while (n--) 
+	{
+		if (pos + 4 > len) 
+		{
+			return -1;
+		}
+		unsigned int sz = 0;
+		memcpy(&sz, &data[pos], 4);
+		if (pos + 4 + sz > len) 
+		{
+			return -1;
+		}
+		out.push_back(std::string(&data[pos + 4], sz));
+		pos += 4 + sz;
+	}
+
+	if (pos != len) 
+	{
+		return -1;
+	}
+
+	return 0;
+}
+
+static int doRequest(const char* req, unsigned int reqlen, unsigned int* rescode, char* res, unsigned int* reslen)
+{
+	std::vector<std::string> cmd;
+	if (0 != parseReq(req, reqlen, cmd)) 
+	{
+		printf("bad request");
+		return -1;
+	}
+	if (cmd.size() == 2 && cmdIs(cmd[0], "get")) 
+	{
+		*rescode = doGet(cmd, res, reslen);
+	}
+	else if (cmd.size() == 3 && cmdIs(cmd[0], "set")) 
+	{
+		*rescode = doSet(cmd, res, reslen);
+	}
+	else if (cmd.size() == 2 && cmdIs(cmd[0], "del")) 
+	{
+		*rescode = doDel(cmd, res, reslen);
+	}
+	else 
+	{
+		*rescode = RES_ERR;
+		const char* msg = "Unknown cmd";
+		strcpy((char*)res, msg);
+		*reslen = strlen(msg);
+		return 0;
+	}
+	return 0;
+}
+
 static bool tryFlushBuffer(Conn* conn)
 {
 	int rv = 0;
@@ -160,13 +278,18 @@ static bool tryOneRequest(Conn* conn)
 	if (4 + len > (conn->rbuf_size - conn->rbuf_processed))
 		return false;
 
-	//do something with request
-	printf("client says: %.*s\n", len, &conn->rbuf[conn->rbuf_processed+4]);
-
-	// generating echoing response
-	memcpy(&conn->wbuf[0], &len, 4);
-	memcpy(&conn->wbuf[4], &conn->rbuf[conn->rbuf_processed+4], len);
-	conn->wbuf_size = 4 + len;
+	unsigned int rescode = 0;
+	unsigned int wlen = 0;
+	int err = doRequest(&conn->rbuf[4], len, &rescode, &conn->wbuf[4 + 4], &wlen);
+	if (err) 
+	{
+		conn->state = STATE_END;
+		return false;
+	}
+	wlen += 4;
+	memcpy(&conn->wbuf[0], &wlen, 4);
+	memcpy(&conn->wbuf[4], &rescode, 4);
+	conn->wbuf_size = 4 + wlen;
 
 	conn->rbuf_processed += 4 + len;
 

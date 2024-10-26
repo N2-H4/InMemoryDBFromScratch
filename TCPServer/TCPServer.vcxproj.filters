@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\RedisFromScratch\BasicTCPServer.cpp">
+    <ClCompile Include="..\TCPServer\BasicTCPServer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

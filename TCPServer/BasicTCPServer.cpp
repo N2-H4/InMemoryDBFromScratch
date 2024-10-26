@@ -135,6 +135,11 @@ static bool tryFlushBuffer(Conn* conn)
 	return true;
 }
 
+static void stateRes(Conn* conn)
+{
+	while (tryFlushBuffer(conn)) {}
+}
+
 static bool tryOneRequest(Conn* conn) 
 {
 	if (conn->rbuf_size < 4)
@@ -218,11 +223,6 @@ static bool tryFillBuffer(Conn* conn)
 static void stateReq(Conn* conn) 
 {
 	while (tryFillBuffer(conn)) {}
-}
-
-static void stateRes(Conn* conn)
-{
-	while (tryFlushBuffer(conn)) {}
 }
 
 static void connectionIO(Conn* conn) 

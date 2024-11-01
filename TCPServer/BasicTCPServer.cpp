@@ -214,7 +214,7 @@ static int doRequest(const char* req, unsigned int reqlen, unsigned int* rescode
 	{
 		*rescode = RES_ERR;
 		const char* msg = "Unknown cmd";
-		strcpy((char*)res, msg);
+		strcpy_s(res, _TRUNCATE, msg);
 		*reslen = strlen(msg);
 		return 0;
 	}

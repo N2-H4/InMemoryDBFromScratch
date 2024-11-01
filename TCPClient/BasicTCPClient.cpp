@@ -1,6 +1,8 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <stdio.h>
+#include <vector>
+#include <string>
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -35,37 +37,67 @@ static int writeAll(SOCKET socket, const char* buf, int n)
     return 0;
 }
 
-static int sendReq(SOCKET socket, const char* text)
+static int sendReq(SOCKET socket, const std::vector<std::string>& cmd) 
 {
-    unsigned int len = (unsigned int)strlen(text);
-    if (len > k_max_msg)
+    unsigned int len = 4;
+    for (const std::string& s : cmd) 
+    {
+        len += 4 + s.size();
+    }
+    if (len > k_max_msg) 
+    {
         return -1;
+    }
 
     char wbuf[4 + k_max_msg];
-    memcpy(wbuf, &len, 4);
-    memcpy(&wbuf[4], text, len);
-    int err = writeAll(socket, wbuf, 4 + len);
-    return err;
+    memcpy(&wbuf[0], &len, 4);
+    unsigned int n = cmd.size();
+    memcpy(&wbuf[4], &n, 4);
+    size_t cur = 8;
+    for (const std::string& s : cmd) 
+    {
+        unsigned int p = (unsigned int)s.size();
+        memcpy(&wbuf[cur], &p, 4);
+        memcpy(&wbuf[cur + 4], s.data(), s.size());
+        cur += 4 + s.size();
+    }
+    return writeAll(socket, wbuf, 4 + len);
 }
 
-static int readRes(SOCKET socket)
+static int readRes(SOCKET socket) 
 {
     char rbuf[4 + k_max_msg + 1];
+    errno = 0;
     int err = readFull(socket, rbuf, 4);
-    if (err < 0)
+    if (err) 
+    {
+        printf("recv() error\n");
         return err;
+    }
 
-    int len = err;
+    unsigned int len = 0;
     memcpy(&len, rbuf, 4);
-    if (len > k_max_msg)
+    if (len > k_max_msg) 
+    {
+        printf("message too long\n");
         return -1;
+    }
 
     err = readFull(socket, &rbuf[4], len);
-    if (err < 0)
+    if (err) 
+    {
+        printf("recv() error\n");
         return err;
+    }
 
-    rbuf[4 + len] = '\0';
-    printf("server says: %s\n", &rbuf[4]);
+    unsigned int rescode = 0;
+    if (len < 4) 
+    {
+        printf("bad response\n");
+        return -1;
+    }
+    memcpy(&rescode, &rbuf[4], 4);
+    printf("server says: [%u] %.*s\n", rescode, len - 4, &rbuf[8]);
     return 0;
 }
 
@@ -144,7 +176,7 @@ int sendAndRecive(SOCKET ConnectSocket)
     } while (iResult > 0);
 }
 
-int main()
+int main(int argc, char** argv)
 {
     int iResult;
     WSADATA wsaData;
@@ -193,17 +225,24 @@ int main()
         return 1;
     }
 
-    const char* query_list[4] = { "hello1", "hello2", "hello3", "hello4"};
-    for (size_t i = 0; i < 4; ++i) {
-        int err = sendReq(ConnectSocket, query_list[i]);
-        if (err != 0)
-            return 1;
-    }
-    for (size_t i = 0; i < 4; ++i) 
+    std::vector<std::string> cmd;
+    for (int i = 1; i < argc; ++i) 
     {
-        int err = readRes(ConnectSocket);
-        if (err != 0)
-            return 1;
+        cmd.push_back(argv[i]);
+    }
+    int err = sendReq(ConnectSocket, cmd);
+    if (err) 
+    {
+        closesocket(ConnectSocket);
+        WSACleanup();
+        return -1;
+    }
+    err = readRes(ConnectSocket);
+    if (err) 
+    {
+        closesocket(ConnectSocket);
+        WSACleanup();
+        return -1;
     }
 
     closesocket(ConnectSocket);

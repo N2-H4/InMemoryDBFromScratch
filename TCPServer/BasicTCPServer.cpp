@@ -32,6 +32,21 @@ enum
 	RES_NX = 2,
 };
 
+enum 
+{
+	ERR_UNKNOWN = 1,
+	ERR_2BIG = 2,
+};
+
+enum 
+{
+	SER_NULL = 0,    //null
+	SER_ERR = 1,    //error code and message
+	SER_STR = 2,    //string
+	SER_INT = 3,    //int
+	SER_ARR = 4,    //array
+};
+
 struct Entry 
 {
 	struct Node node;
@@ -131,7 +146,41 @@ static int32_t acceptNewConn(std::vector<Conn*>& conns, SOCKET socket)
 	return 0;
 }
 
-static unsigned long long str_hash(const char* data, unsigned long long len) 
+static void outErr(std::string& out, int code, const std::string& msg) 
+{
+	out.push_back(SER_ERR);
+	out.append((char*)&code, 4);
+	unsigned int len = (unsigned int)msg.size();
+	out.append((char*)&len, 4);
+	out.append(msg);
+}
+
+static void outNull(std::string& out) 
+{
+	out.push_back(SER_NULL);
+}
+
+static void outStr(std::string& out, const std::string& val) 
+{
+	out.push_back(SER_STR);
+	unsigned int len = (unsigned int)val.size();
+	out.append((char*)&len, 4);
+	out.append(val);
+}
+
+static void outInt(std::string& out, long long val) 
+{
+	out.push_back(SER_INT);
+	out.append((char*)&val, 8);
+}
+
+static void outArr(std::string& out, unsigned int n) 
+{
+	out.push_back(SER_ARR);
+	out.append((char*)&n, 4);
+}
+
+static unsigned long long strHash(const char* data, unsigned long long len) 
 {
 	unsigned long long h = 0x811C9DC5;
 	for (unsigned long long i = 0; i < len; i++) 
@@ -148,40 +197,60 @@ static bool entryEq(Node* lhs, Node* rhs)
 	return le->key == re->key;
 }
 
-static unsigned int doGet(std::vector<std::string>& cmd, char* res, unsigned int* reslen)
+static void hScan(HashTable* tab, void (*f)(Node*, void*), void* arg) 
 {
+	if (tab->size == 0) 
+	{
+		return;
+	}
+	for (unsigned long long i = 0; i < tab->mask + 1; ++i) 
+{
+		Node* node = tab->tab[i];
+		while (node) 
+		{
+			f(node, arg);
+			node = node->next;
+		}
+	}
+}
 
+static void cbScan(Node* node, void* arg) 
+{
+	std::string& out = *(std::string*)arg;
+	struct Entry* e = container_of(node, Entry, node);
+	outStr(out, e->key);
+}
+
+static void doKeys(std::vector<std::string>& cmd, std::string& out) 
+{
+	(void)cmd;
+	outArr(out, (unsigned int)hashMapSize(&g_data.db));
+	hScan(&g_data.db.ht1, &cbScan, &out);
+	hScan(&g_data.db.ht2, &cbScan, &out);
+}
+
+static void doGet(std::vector<std::string>& cmd, std::string& out)
+{
 	Entry entry;
 	entry.key.swap(cmd[1]);
-	entry.node.hash_code = str_hash(entry.key.data(), entry.key.size());
+	entry.node.hash_code = strHash(entry.key.data(), entry.key.size());
 
 	Node* n = hashMapLookup(&g_data.db, &entry.node, &entryEq);
 	if (!n) 
 	{
-		return RES_NX;
+		return outNull(out);
 	}
 
 	struct Entry* e = container_of(n, struct Entry, node);
 	const std::string& val = e->val;
-	if (val.size() > k_max_msg)
-	{
-		printf("Node value too big\n");
-		return RES_ERR;
-	}
-
-	memcpy(res, val.data(), val.size());
-	*reslen = (unsigned int)val.size();
-	return RES_OK;
+	outStr(out,val);
 }
 
-static unsigned int doSet(std::vector<std::string>& cmd, char* res, unsigned int* reslen)
-{
-	(void)res;
-	(void)reslen;
-	
+static void doSet(std::vector<std::string>& cmd, std::string& out)
+{;
 	Entry entry;
 	entry.key.swap(cmd[1]);
-	entry.node.hash_code = str_hash(entry.key.data(), entry.key.size());
+	entry.node.hash_code = strHash(entry.key.data(), entry.key.size());
 
 	Node* node = hashMapLookup(&g_data.db, &entry.node, &entryEq);
 	if (node) 
@@ -197,24 +266,21 @@ static unsigned int doSet(std::vector<std::string>& cmd, char* res, unsigned int
 		ent->val.swap(cmd[2]);
 		hashMapInsert(&g_data.db, &ent->node);
 	}
-	return RES_OK;
+	return outNull(out);
 }
 
-static unsigned int doDel(std::vector<std::string>& cmd, char* res, unsigned int* reslen)
+static void doDel(std::vector<std::string>& cmd, std::string& out)
 {
-	(void)res;
-	(void)reslen;
-
 	Entry entry;
 	entry.key.swap(cmd[1]);
-	entry.node.hash_code = str_hash(entry.key.data(), entry.key.size());
+	entry.node.hash_code = strHash(entry.key.data(), entry.key.size());
 
 	Node* node = hashMapPop(&g_data.db, &entry.node, &entryEq);
 	if (node) 
 	{
 		delete container_of(node, Entry, node);
 	}
-	return RES_OK;
+	return outInt(out, node ? 1 : 0);
 }
 
 static bool cmdIs(const std::string& word, const char* cmd) 
@@ -260,35 +326,59 @@ static int parseReq(const char* data, size_t len, std::vector<std::string>& out)
 	return 0;
 }
 
-static int doRequest(const char* req, unsigned int reqlen, unsigned int* rescode, char* res, unsigned int* reslen)
+//static int doRequest(const char* req, unsigned int reqlen, unsigned int* rescode, char* res, unsigned int* reslen)
+//{
+//	std::vector<std::string> cmd;
+//	if (0 != parseReq(req, reqlen, cmd)) 
+//	{
+//		printf("bad request\n");
+//		return -1;
+//	}
+//	if (cmd.size() == 2 && cmdIs(cmd[0], "get")) 
+//	{
+//		*rescode = doGet(cmd, res, reslen);
+//	}
+//	else if (cmd.size() == 3 && cmdIs(cmd[0], "set")) 
+//	{
+//		*rescode = doSet(cmd, res, reslen);
+//	}
+//	else if (cmd.size() == 2 && cmdIs(cmd[0], "del")) 
+//	{
+//		*rescode = doDel(cmd, res, reslen);
+//	}
+//	else 
+//	{
+//		*rescode = RES_ERR;
+//		const char* msg = "Unknown cmd";
+//		strcpy_s(res, _TRUNCATE, msg);
+//		*reslen = strlen(msg);
+//		return 0;
+//	}
+//	return 0;
+//}
+
+static void doRequest(std::vector<std::string>& cmd, std::string& out) 
 {
-	std::vector<std::string> cmd;
-	if (0 != parseReq(req, reqlen, cmd)) 
+	if (cmd.size() == 1 && cmdIs(cmd[0], "keys")) 
 	{
-		printf("bad request\n");
-		return -1;
+		doKeys(cmd, out);
 	}
-	if (cmd.size() == 2 && cmdIs(cmd[0], "get")) 
+	else if (cmd.size() == 2 && cmdIs(cmd[0], "get")) 
 	{
-		*rescode = doGet(cmd, res, reslen);
+		doGet(cmd, out);
 	}
 	else if (cmd.size() == 3 && cmdIs(cmd[0], "set")) 
 	{
-		*rescode = doSet(cmd, res, reslen);
+		doSet(cmd, out);
 	}
 	else if (cmd.size() == 2 && cmdIs(cmd[0], "del")) 
 	{
-		*rescode = doDel(cmd, res, reslen);
+		doDel(cmd, out);
 	}
 	else 
 	{
-		*rescode = RES_ERR;
-		const char* msg = "Unknown cmd";
-		strcpy_s(res, _TRUNCATE, msg);
-		*reslen = strlen(msg);
-		return 0;
+		outErr(out, ERR_UNKNOWN, "Unknown cmd");
 	}
-	return 0;
 }
 
 static bool tryFlushBuffer(Conn* conn)
@@ -348,17 +438,27 @@ static bool tryOneRequest(Conn* conn)
 	if (4 + len > (conn->rbuf_size - conn->rbuf_processed))
 		return false;
 
-	unsigned int rescode = 0;
-	unsigned int wlen = 0;
-	int err = doRequest(&conn->rbuf[4], len, &rescode, &conn->wbuf[4 + 4], &wlen);
-	if (err) 
+	std::vector<std::string> cmd;
+	if (0 != parseReq(&conn->rbuf[4], len, cmd)) 
 	{
+		printf("bad req\n");
 		conn->state = STATE_END;
 		return false;
 	}
-	wlen += 4;
+
+	std::string out;
+	doRequest(cmd, out);
+
+	if (4 + out.size() > k_max_msg) 
+	{
+		out.clear();
+		outErr(out, ERR_2BIG, "response is too big");
+	}
+
+	unsigned int wlen = (unsigned int)out.size();
+
 	memcpy(&conn->wbuf[0], &wlen, 4);
-	memcpy(&conn->wbuf[4], &rescode, 4);
+	memcpy(&conn->wbuf[4], out.data(), out.size());
 	conn->wbuf_size = 4 + wlen;
 
 	conn->rbuf_processed += 4 + len;

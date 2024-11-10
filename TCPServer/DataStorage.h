@@ -2,7 +2,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-
 struct Node
 {
     Node* next = NULL;
@@ -23,8 +22,8 @@ struct HashMap
     unsigned long long resizing_pos = 0;
 };
 
-static void hashMapInsert(HashMap* hmap, Node* node);
-Node* hashMaplookup(HashMap* hmap, Node* key, bool (*eq)(Node*, Node*));
+void hashMapInsert(HashMap* hmap, Node* node);
+Node* hashMapLookup(HashMap* hmap, Node* key, bool (*eq)(Node*, Node*));
 Node* hashMapPop(HashMap* hmap, Node* key, bool (*eq)(Node*, Node*));
 unsigned long long hashMapSize(HashMap* hmap);
 static void hashMapDestroy(HashMap* hmap);

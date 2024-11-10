@@ -226,10 +226,10 @@ int main(int argc, char** argv)
     }
 
     std::vector<std::string> cmd;
-    for (int i = 1; i < argc; ++i) 
-    {
-        cmd.push_back(argv[i]);
-    }
+    cmd.push_back("set");
+    cmd.push_back("k");
+    cmd.push_back("v");
+
     int err = sendReq(ConnectSocket, cmd);
     if (err) 
     {
@@ -239,6 +239,57 @@ int main(int argc, char** argv)
     }
     err = readRes(ConnectSocket);
     if (err) 
+    {
+        closesocket(ConnectSocket);
+        WSACleanup();
+        return -1;
+    }
+    cmd.clear();
+    cmd.push_back("get");
+    cmd.push_back("k");
+    err = sendReq(ConnectSocket, cmd);
+    if (err)
+    {
+        closesocket(ConnectSocket);
+        WSACleanup();
+        return -1;
+    }
+    err = readRes(ConnectSocket);
+    if (err)
+    {
+        closesocket(ConnectSocket);
+        WSACleanup();
+        return -1;
+    }
+    cmd.clear();
+    cmd.push_back("del");
+    cmd.push_back("k");
+    err = sendReq(ConnectSocket, cmd);
+    if (err)
+    {
+        closesocket(ConnectSocket);
+        WSACleanup();
+        return -1;
+    }
+    err = readRes(ConnectSocket);
+    if (err)
+    {
+        closesocket(ConnectSocket);
+        WSACleanup();
+        return -1;
+    }
+    cmd.clear();
+    cmd.push_back("get");
+    cmd.push_back("k");
+    err = sendReq(ConnectSocket, cmd);
+    if (err)
+    {
+        closesocket(ConnectSocket);
+        WSACleanup();
+        return -1;
+    }
+    err = readRes(ConnectSocket);
+    if (err)
     {
         closesocket(ConnectSocket);
         WSACleanup();

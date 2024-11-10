@@ -5,11 +5,15 @@
 #include <vector>
 #include <string>
 #include <map>
+#include "DataStorage.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 
 #define DEFAULT_PORT "27015"
 #define DEFAULT_BUFLEN 512
+
+#define container_of(ptr, T, member) \
+    (T *)( (char *)ptr - offsetof(T, member) )
 
 const int k_max_msg = 4096;
 const int k_max_args = 1024;
@@ -27,6 +31,18 @@ enum
 	RES_ERR = 1,
 	RES_NX = 2,
 };
+
+struct Entry 
+{
+	struct Node node;
+	std::string key;
+	std::string val;
+};
+
+static struct 
+{
+	HashMap db;
+} g_data;
 
 static std::map<std::string, std::string> g_map;
 
@@ -115,35 +131,89 @@ static int32_t acceptNewConn(std::vector<Conn*>& conns, SOCKET socket)
 	return 0;
 }
 
-static unsigned int doGet(const std::vector<std::string>& cmd, char* res, unsigned int* reslen)
+static unsigned long long str_hash(const char* data, unsigned long long len) 
 {
-	if (!g_map.count(cmd[1])) 
+	unsigned long long h = 0x811C9DC5;
+	for (unsigned long long i = 0; i < len; i++) 
+	{
+		h = (h + data[i]) * 0x01000193;
+	}
+	return h;
+}
+
+static bool entryEq(Node* lhs, Node* rhs) 
+{
+	struct Entry* le = container_of(lhs, struct Entry, node);
+	struct Entry* re = container_of(rhs, struct Entry, node);
+	return le->key == re->key;
+}
+
+static unsigned int doGet(std::vector<std::string>& cmd, char* res, unsigned int* reslen)
+{
+
+	Entry entry;
+	entry.key.swap(cmd[1]);
+	entry.node.hash_code = str_hash(entry.key.data(), entry.key.size());
+
+	Node* n = hashMapLookup(&g_data.db, &entry.node, &entryEq);
+	if (!n) 
 	{
 		return RES_NX;
 	}
-	std::string& val = g_map[cmd[1]];
-	if(val.size() > k_max_msg)
+
+	struct Entry* e = container_of(n, struct Entry, node);
+	const std::string& val = e->val;
+	if (val.size() > k_max_msg)
 	{
-		return RES_NX;
+		printf("Node value too big\n");
+		return RES_ERR;
 	}
+
 	memcpy(res, val.data(), val.size());
 	*reslen = (unsigned int)val.size();
 	return RES_OK;
 }
 
-static unsigned int doSet(const std::vector<std::string>& cmd, char* res, unsigned int* reslen)
+static unsigned int doSet(std::vector<std::string>& cmd, char* res, unsigned int* reslen)
 {
 	(void)res;
 	(void)reslen;
-	g_map[cmd[1]] = cmd[2];
+	
+	Entry entry;
+	entry.key.swap(cmd[1]);
+	entry.node.hash_code = str_hash(entry.key.data(), entry.key.size());
+
+	Node* node = hashMapLookup(&g_data.db, &entry.node, &entryEq);
+	if (node) 
+	{
+		struct Entry* e = container_of(node, struct Entry, node);
+		e->val.swap(cmd[2]);
+	}
+	else 
+	{
+		Entry* ent = new Entry();
+		ent->key.swap(entry.key);
+		ent->node.hash_code = entry.node.hash_code;
+		ent->val.swap(cmd[2]);
+		hashMapInsert(&g_data.db, &ent->node);
+	}
 	return RES_OK;
 }
 
-static unsigned int doDel(const std::vector<std::string>& cmd, char* res, unsigned int* reslen)
+static unsigned int doDel(std::vector<std::string>& cmd, char* res, unsigned int* reslen)
 {
 	(void)res;
 	(void)reslen;
-	g_map.erase(cmd[1]);
+
+	Entry entry;
+	entry.key.swap(cmd[1]);
+	entry.node.hash_code = str_hash(entry.key.data(), entry.key.size());
+
+	Node* node = hashMapPop(&g_data.db, &entry.node, &entryEq);
+	if (node) 
+	{
+		delete container_of(node, Entry, node);
+	}
 	return RES_OK;
 }
 
@@ -195,7 +265,7 @@ static int doRequest(const char* req, unsigned int reqlen, unsigned int* rescode
 	std::vector<std::string> cmd;
 	if (0 != parseReq(req, reqlen, cmd)) 
 	{
-		printf("bad request");
+		printf("bad request\n");
 		return -1;
 	}
 	if (cmd.size() == 2 && cmdIs(cmd[0], "get")) 

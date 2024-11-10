@@ -82,7 +82,7 @@ static void hashMapHelpResizing(HashMap* hmap)
     }
 }
 
-static void hashMapInsert(HashMap* hmap, Node* node) 
+void hashMapInsert(HashMap* hmap, Node* node)
 {
     if (!hmap->ht1.tab) 
     {
@@ -101,7 +101,7 @@ static void hashMapInsert(HashMap* hmap, Node* node)
     hashMapHelpResizing(hmap);
 }
 
-Node* hashMaplookup(HashMap* hmap, Node* key, bool (*eq)(Node*, Node*)) 
+Node* hashMapLookup(HashMap* hmap, Node* key, bool (*eq)(Node*, Node*)) 
 {
     hashMapHelpResizing(hmap);
     Node** from = hashTableLookup(&hmap->ht1, key, eq);

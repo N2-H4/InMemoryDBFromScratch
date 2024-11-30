@@ -6,6 +6,7 @@
 #include <string>
 #include <map>
 #include "DataStorage.h"
+#include "ZSet.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -36,15 +37,24 @@ enum
 {
 	ERR_UNKNOWN = 1,
 	ERR_2BIG = 2,
+	ERR_TYPE = 3,
+	ERR_ARG = 4,
 };
 
 enum 
 {
-	SER_NULL = 0,    //null
+	SER_NULL = 0,   //null
 	SER_ERR = 1,    //error code and message
 	SER_STR = 2,    //string
 	SER_INT = 3,    //int
 	SER_ARR = 4,    //array
+	SER_DBL = 5,	//double
+};
+
+enum 
+{
+	T_STR = 0,
+	T_ZSET = 1,
 };
 
 struct Entry 
@@ -52,6 +62,8 @@ struct Entry
 	struct Node node;
 	std::string key;
 	std::string val;
+	unsigned int type = 0;
+	ZSet* zset = NULL;
 };
 
 static struct 
@@ -107,7 +119,7 @@ static void connPut(std::vector<Conn*>& conns, struct Conn* conn)
 	conns[conn->socket] = conn;
 }
 
-static int32_t acceptNewConn(std::vector<Conn*>& conns, SOCKET socket) 
+static int acceptNewConn(std::vector<Conn*>& conns, SOCKET socket) 
 {
 	struct sockaddr_in client_addr = {};
 	socklen_t socklen = sizeof(client_addr);
@@ -168,6 +180,14 @@ static void outStr(std::string& out, const std::string& val)
 	out.append(val);
 }
 
+static void outStr(std::string& out, const char* s, size_t size) 
+{
+	out.push_back(SER_STR);
+	unsigned int len = (unsigned int)size;
+	out.append((char*)&len, 4);
+	out.append(s, len);
+}
+
 static void outInt(std::string& out, long long val) 
 {
 	out.push_back(SER_INT);
@@ -178,6 +198,64 @@ static void outArr(std::string& out, unsigned int n)
 {
 	out.push_back(SER_ARR);
 	out.append((char*)&n, 4);
+}
+
+static void* beginArr(std::string& out) 
+{
+	out.push_back(SER_ARR);
+	out.append("\0\0\0\0", 4);
+	return (void*)(out.size() - 4);
+}
+
+static void endArr(std::string& out, void* ctx, unsigned int n) 
+{
+	size_t pos = (size_t)ctx;
+	if (out[pos - 1] != SER_ARR)
+	{
+		out.append("arr err");
+	}
+	memcpy(&out[pos], &n, 4);
+}
+
+static void outDbl(std::string& out, double val) 
+{
+	out.push_back(SER_DBL);
+	out.append((char*)&val, 8);
+}
+
+static bool str2dbl(const std::string& s, double& out) 
+{
+	char* endp = NULL;
+	out = strtod(s.c_str(), &endp);
+	return endp == s.c_str() + s.size() && !isnan(out);
+}
+
+static bool str2int(const std::string& s, long long& out) 
+{
+	char* endp = NULL;
+	out = strtoll(s.c_str(), &endp, 10);
+	return endp == s.c_str() + s.size();
+}
+
+static bool expectZSet(std::string& out, std::string& s, Entry** ent) 
+{
+	Entry key;
+	key.key.swap(s);
+	key.node.hash_code = strHash(key.key.data(), key.key.size());
+	Node* hnode = hashMapLookup(&g_data.db, &key.node, &entryEq);
+	if (!hnode) 
+	{
+		outNull(out);
+		return false;
+	}
+
+	*ent = container_of(hnode, Entry, node);
+	if ((*ent)->type != T_ZSET) 
+	{
+		outErr(out, ERR_TYPE, "expect zset");
+		return false;
+	}
+	return true;
 }
 
 static unsigned long long strHash(const char* data, unsigned long long len) 
@@ -242,8 +320,11 @@ static void doGet(std::vector<std::string>& cmd, std::string& out)
 	}
 
 	struct Entry* e = container_of(n, struct Entry, node);
-	const std::string& val = e->val;
-	outStr(out,val);
+	if (e->type != T_STR) 
+	{
+		return outErr(out, ERR_TYPE, "expect string type");
+	}
+	return outStr(out, e->val);
 }
 
 static void doSet(std::vector<std::string>& cmd, std::string& out)
@@ -256,6 +337,10 @@ static void doSet(std::vector<std::string>& cmd, std::string& out)
 	if (node) 
 	{
 		struct Entry* e = container_of(node, struct Entry, node);
+		if (e->type != T_STR) 
+		{
+			return outErr(out, ERR_TYPE, "expect string type");
+		}
 		e->val.swap(cmd[2]);
 	}
 	else 
@@ -267,6 +352,55 @@ static void doSet(std::vector<std::string>& cmd, std::string& out)
 		hashMapInsert(&g_data.db, &ent->node);
 	}
 	return outNull(out);
+}
+
+static void doZAdd(std::vector<std::string>& cmd, std::string& out) 
+{
+	double score = 0;
+	if (!str2dbl(cmd[2], score)) 
+	{
+		return outErr(out, ERR_ARG, "expect fp number");
+	}
+
+	Entry key;
+	key.key.swap(cmd[1]);
+	key.node.hash_code = strHash(key.key.data(), key.key.size());
+	Node* hnode = hashMapLookup(&g_data.db, &key.node, &entryEq);
+
+	Entry* ent = NULL;
+	if (!hnode) 
+	{
+		ent = new Entry();
+		ent->key.swap(key.key);
+		ent->node.hash_code = key.node.hash_code;
+		ent->type = T_ZSET;
+		ent->zset = new ZSet();
+		hashMapInsert(&g_data.db, &ent->node);
+	}
+	else 
+	{
+		ent = container_of(hnode, Entry, node);
+		if (ent->type != T_ZSET) 
+		{
+			return outErr(out, ERR_TYPE, "expect zset");
+		}
+	}
+
+	const std::string& name = cmd[3];
+	bool added = zSetAdd(ent->zset, name.data(), name.size(), score);
+	return outInt(out, (int)added);
+}
+
+static void entryDel(Entry* ent) 
+{
+	switch (ent->type) 
+	{
+	case T_ZSET:
+		zSetDispose(ent->zset);
+		delete ent->zset;
+		break;
+	}
+	delete ent;
 }
 
 static void doDel(std::vector<std::string>& cmd, std::string& out)
@@ -282,6 +416,85 @@ static void doDel(std::vector<std::string>& cmd, std::string& out)
 	}
 	return outInt(out, node ? 1 : 0);
 }
+
+static void doZQuery(std::vector<std::string>& cmd, std::string& out) 
+{
+	double score = 0;
+	if (!str2dbl(cmd[2], score)) 
+	{
+		return outErr(out, ERR_ARG, "expect fp number");
+	}
+	const std::string& name = cmd[3];
+	long long offset = 0;
+	long long limit = 0;
+	if (!str2int(cmd[4], offset)) 
+	{
+		return outErr(out, ERR_ARG, "expect int");
+	}
+	if (!str2int(cmd[5], limit)) 
+	{
+		return outErr(out, ERR_ARG, "expect int");
+	}
+
+	Entry* ent = NULL;
+	if (!expectZSet(out, cmd[1], &ent)) 
+	{
+		if (out[0] == SER_NULL) 
+		{
+			out.clear();
+			outArr(out, 0);
+		}
+		return;
+	}
+
+	if (limit <= 0) 
+	{
+		return outArr(out, 0);
+	}
+	ZNode* znode = zSetQuery(ent->zset, score, name.data(), name.size());
+	znode = zNodeOffset(znode, offset);
+
+	void* arr = beginArr(out);
+	unsigned int n = 0;
+	while (znode && (long long)n < limit) 
+	{
+		outStr(out, znode->name, znode->len);
+		outDbl(out, znode->score);
+		znode = zNodeOffset(znode, +1);
+		n += 2;
+	}
+	endArr(out, arr, n);
+}
+static void doZRem(std::vector<std::string>& cmd, std::string& out) 
+{
+	Entry* ent = NULL;
+	if (!expectZSet(out, cmd[1], &ent)) 
+	{
+		return;
+	}
+
+	const std::string& name = cmd[2];
+	ZNode* znode = zSetPop(ent->zset, name.data(), name.size());
+	if (znode) 
+	{
+		zNodeDel(znode);
+	}
+	return outInt(out, znode ? 1 : 0);
+}
+
+static void doZScore(std::vector<std::string>& cmd, std::string& out) 
+{
+	Entry* ent = NULL;
+	if (!expectZSet(out, cmd[1], &ent)) 
+	{
+		return;
+	}
+
+	const std::string& name = cmd[2];
+	ZNode* znode = zSetLookup(ent->zset, name.data(), name.size());
+	return znode ? outDbl(out, znode->score) : outNull(out);
+}
+
 
 static bool cmdIs(const std::string& word, const char* cmd) 
 {
@@ -374,6 +587,22 @@ static void doRequest(std::vector<std::string>& cmd, std::string& out)
 	else if (cmd.size() == 2 && cmdIs(cmd[0], "del")) 
 	{
 		doDel(cmd, out);
+	}
+	else if (cmd.size() == 4 && cmdIs(cmd[0], "zadd")) 
+	{
+		doZAdd(cmd, out);
+	}
+	else if (cmd.size() == 3 && cmdIs(cmd[0], "zrem")) 
+	{
+		doZRem(cmd, out);
+	}
+	else if (cmd.size() == 3 && cmdIs(cmd[0], "zscore")) 
+	{
+		doZScore(cmd, out);
+	}
+	else if (cmd.size() == 6 && cmdIs(cmd[0], "zquery")) 
+	{
+		doZQuery(cmd, out);
 	}
 	else 
 	{

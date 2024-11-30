@@ -128,10 +128,14 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\TCPServer\BasicTCPServer.cpp" />
+    <ClCompile Include="AVLTree.cpp" />
     <ClCompile Include="DataStorage.cpp" />
+    <ClCompile Include="ZSet.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="AVLTree.h" />
     <ClInclude Include="DataStorage.h" />
+    <ClInclude Include="ZSet.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -21,9 +21,21 @@
     <ClCompile Include="DataStorage.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="AVLTree.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ZSet.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DataStorage.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="AVLTree.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ZSet.h">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>

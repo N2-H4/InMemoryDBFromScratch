@@ -11,6 +11,15 @@
 
 const int k_max_msg = 4096;
 
+enum
+{
+    SER_NULL = 0,    //null
+    SER_ERR = 1,    //error code and message
+    SER_STR = 2,    //string
+    SER_INT = 3,    //int
+    SER_ARR = 4,    //array
+};
+
 static int readFull(SOCKET socket, char* buf, int n)
 {
     while (n > 0)
@@ -64,6 +73,100 @@ static int sendReq(SOCKET socket, const std::vector<std::string>& cmd)
     return writeAll(socket, wbuf, 4 + len);
 }
 
+static int onResponse(const unsigned char* data, size_t size) 
+{
+    if (size < 1) 
+    {
+        printf("bad response\n");
+        return -1;
+    }
+    switch (data[0]) 
+    {
+    case SER_NULL:
+        printf("(null)\n");
+        return 1;
+    case SER_ERR:
+        if (size < 1 + 8) 
+        {
+            printf("bad response\n");
+            return -1;
+        }
+        else
+        {
+            int code = 0;
+            unsigned int len = 0;
+            memcpy(&code, &data[1], 4);
+            memcpy(&len, &data[1 + 4], 4);
+            if (size < 1 + 8 + len) 
+            {
+                printf("bad response\n");
+                return -1;
+            }
+            printf("(err) %d %.*s\n", code, len, &data[1 + 8]);
+            return 1 + 8 + len;
+        }
+    case SER_STR:
+        if (size < 1 + 4) 
+        {
+            printf("bad response\n");
+            return -1;
+        }
+        else
+        {
+            unsigned int len = 0;
+            memcpy(&len, &data[1], 4);
+            if (size < 1 + 4 + len) 
+            {
+                printf("bad response\n");
+                return -1;
+            }
+            printf("(str) %.*s\n", len, &data[1 + 4]);
+            return 1 + 4 + len;
+        }
+    case SER_INT:
+        if (size < 1 + 8) 
+        {
+            printf("bad response\n");
+            return -1;
+        }
+        else
+        {
+            long long val = 0;
+            memcpy(&val, &data[1], 8);
+            printf("(int) %ld\n", (int)val);
+            return 1 + 8;
+        }
+    case SER_ARR:
+        if (size < 1 + 4) 
+        {
+            printf("bad response\n");
+            return -1;
+        }
+        else
+        {
+            unsigned int len = 0;
+            memcpy(&len, &data[1], 4);
+            printf("(arr) len=%u\n", len);
+            size_t arr_bytes = 1 + 4;
+            for (unsigned int i = 0; i < len; ++i) 
+            {
+                int rv = onResponse(&data[arr_bytes], size - arr_bytes);
+                if (rv < 0) 
+                {
+                    return rv;
+                }
+                arr_bytes += (size_t)rv;
+            }
+            printf("(arr) end\n");
+            return (int)arr_bytes;
+        }
+    default:
+        printf("bad response\n");
+        return -1;
+    }
+}
+
+
 static int readRes(SOCKET socket) 
 {
     char rbuf[4 + k_max_msg + 1];
@@ -90,14 +193,12 @@ static int readRes(SOCKET socket)
         return err;
     }
 
-    unsigned int rescode = 0;
-    if (len < 4) 
+    int rv = onResponse((unsigned char*)&rbuf[4], len);
+    if (rv > 0 && (unsigned int)rv != len) 
     {
         printf("bad response\n");
-        return -1;
+        rv = -1;
     }
-    memcpy(&rescode, &rbuf[4], 4);
-    printf("server says: [%u] %.*s\n", rescode, len - 4, &rbuf[8]);
     return 0;
 }
 
@@ -176,6 +277,36 @@ int sendAndRecive(SOCKET ConnectSocket)
     } while (iResult > 0);
 }
 
+int sendCmd(SOCKET ConnectSocket, std::string s1, std::string s2, std::string s3)
+{
+    std::vector<std::string> cmd;
+    cmd.push_back(s1);
+    if (s2.length() > 0)
+    {
+        cmd.push_back(s2);
+    }
+    if (s3.length() > 0)
+    {
+        cmd.push_back(s3);
+    }
+
+    int err = sendReq(ConnectSocket, cmd);
+    if (err)
+    {
+        closesocket(ConnectSocket);
+        WSACleanup();
+        return -1;
+    }
+    err = readRes(ConnectSocket);
+    if (err)
+    {
+        closesocket(ConnectSocket);
+        WSACleanup();
+        return -1;
+    }
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     int iResult;
@@ -225,76 +356,9 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    std::vector<std::string> cmd;
-    cmd.push_back("set");
-    cmd.push_back("k");
-    cmd.push_back("v");
-
-    int err = sendReq(ConnectSocket, cmd);
-    if (err) 
-    {
-        closesocket(ConnectSocket);
-        WSACleanup();
-        return -1;
-    }
-    err = readRes(ConnectSocket);
-    if (err) 
-    {
-        closesocket(ConnectSocket);
-        WSACleanup();
-        return -1;
-    }
-    cmd.clear();
-    cmd.push_back("get");
-    cmd.push_back("k");
-    err = sendReq(ConnectSocket, cmd);
-    if (err)
-    {
-        closesocket(ConnectSocket);
-        WSACleanup();
-        return -1;
-    }
-    err = readRes(ConnectSocket);
-    if (err)
-    {
-        closesocket(ConnectSocket);
-        WSACleanup();
-        return -1;
-    }
-    cmd.clear();
-    cmd.push_back("del");
-    cmd.push_back("k");
-    err = sendReq(ConnectSocket, cmd);
-    if (err)
-    {
-        closesocket(ConnectSocket);
-        WSACleanup();
-        return -1;
-    }
-    err = readRes(ConnectSocket);
-    if (err)
-    {
-        closesocket(ConnectSocket);
-        WSACleanup();
-        return -1;
-    }
-    cmd.clear();
-    cmd.push_back("get");
-    cmd.push_back("k");
-    err = sendReq(ConnectSocket, cmd);
-    if (err)
-    {
-        closesocket(ConnectSocket);
-        WSACleanup();
-        return -1;
-    }
-    err = readRes(ConnectSocket);
-    if (err)
-    {
-        closesocket(ConnectSocket);
-        WSACleanup();
-        return -1;
-    }
+    sendCmd(ConnectSocket, "set", "k", "v");
+    sendCmd(ConnectSocket, "get", "k", "");
+    sendCmd(ConnectSocket, "keys", "", "");
 
     closesocket(ConnectSocket);
     WSACleanup();

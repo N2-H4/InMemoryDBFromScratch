@@ -384,7 +384,6 @@ int main(int argc, char** argv)
     sendCmd(ConnectSocket, "zrem zset n1");
     sendCmd(ConnectSocket, "zquery zset 1 \"\" 0 10");
 
-
     closesocket(ConnectSocket);
     WSACleanup();
 

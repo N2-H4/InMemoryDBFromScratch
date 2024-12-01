@@ -135,6 +135,8 @@
   <ItemGroup>
     <ClInclude Include="AVLTree.h" />
     <ClInclude Include="DataStorage.h" />
+    <ClInclude Include="LinkedList.h" />
+    <ClInclude Include="Timing.h" />
     <ClInclude Include="ZSet.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

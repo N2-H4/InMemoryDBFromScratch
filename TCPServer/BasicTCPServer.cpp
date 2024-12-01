@@ -6,6 +6,8 @@
 #include <string>
 #include <map>
 #include "ZSet.h"
+#include "LinkedList.h"
+#include "Timing.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -17,6 +19,7 @@
 
 const int k_max_msg = 4096;
 const int k_max_args = 1024;
+const unsigned long long k_idle_timeout_ms = 5 * 1000;
 
 enum 
 {
@@ -65,14 +68,7 @@ struct Entry
 	ZSet* zset = NULL;
 };
 
-static struct 
-{
-	HashMap db;
-} g_data;
-
-static std::map<std::string, std::string> g_map;
-
-struct Conn 
+struct Conn
 {
 	SOCKET socket = INVALID_SOCKET;
 	unsigned int state = 0;
@@ -82,7 +78,68 @@ struct Conn
 	int wbuf_size = 0;
 	int wbuf_sent = 0;
 	char wbuf[4 + k_max_msg];
+	unsigned long long idle_start = 0;
+	DList idle_list;
 };
+
+static struct 
+{
+	HashMap db;
+	std::vector<Conn*> socket_conn;
+	DList idle_list;
+} g_data;
+
+static std::map<std::string, std::string> g_map;
+
+static unsigned long long getMonotonicUsec() 
+{
+	timespec tv = { 0, 0 };
+	clock_gettime_monotonic(&tv);
+	return (unsigned long long)(tv.tv_sec) * 1000000 + tv.tv_nsec / 1000;
+}
+
+static unsigned int nextTimerMs()
+{
+	if (dListEmpty(&g_data.idle_list))
+	{
+		return 10000;
+	}
+
+	unsigned long long now_us = getMonotonicUsec();
+	Conn* next = container_of(g_data.idle_list.next, Conn, idle_list);
+	unsigned long long next_us = next->idle_start + k_idle_timeout_ms * 1000;
+	if (next_us <= now_us) 
+	{
+		return 0;
+	}
+
+	return (unsigned int)((next_us - now_us) / 1000);
+}
+
+static void connDone(Conn* conn)
+{
+	g_data.socket_conn[conn->socket] = NULL;
+	(void)closesocket(conn->socket);
+	dListDetach(&conn->idle_list);
+	free(conn);
+}
+
+static void processTimers() 
+{
+	unsigned long long now_us = getMonotonicUsec();
+	while (!dListEmpty(&g_data.idle_list)) 
+	{
+		Conn* next = container_of(g_data.idle_list.next, Conn, idle_list);
+		unsigned long long next_us = next->idle_start + k_idle_timeout_ms * 1000;
+		if (next_us >= now_us + 1000)
+		{
+			break;
+		}
+
+		printf("removing idle connection: %d\n", (int)next->socket);
+		connDone(next);
+	}
+}
 
 static unsigned long long strHash(const char* data, unsigned long long len)
 {
@@ -127,15 +184,16 @@ static int writeAll(SOCKET socket, const char* buf, int n)
 	return 0;
 }
 
-static void connPut(std::vector<Conn*>& conns, struct Conn* conn) 
+static void connPut(std::vector<Conn*> &conns, struct Conn* conn) 
 {
-	if (conns.size() <= (size_t)conn->socket) {
+	if (conns.size() <= (size_t)conn->socket) 
+	{
 		conns.resize(conn->socket + 1);
 	}
 	conns[conn->socket] = conn;
 }
 
-static int acceptNewConn(std::vector<Conn*>& conns, SOCKET socket) 
+static int acceptNewConn(SOCKET socket) 
 {
 	struct sockaddr_in client_addr = {};
 	socklen_t socklen = sizeof(client_addr);
@@ -170,7 +228,9 @@ static int acceptNewConn(std::vector<Conn*>& conns, SOCKET socket)
 	conn->rbuf_processed = 0;
 	conn->wbuf_size = 0;
 	conn->wbuf_sent = 0;
-	connPut(conns, conn);
+	conn->idle_start = getMonotonicUsec();
+	dListInsertBefore(&g_data.idle_list, &conn->idle_list);
+	connPut(g_data.socket_conn, conn);
 	return 0;
 }
 
@@ -538,37 +598,6 @@ static int parseReq(const char* data, size_t len, std::vector<std::string>& out)
 	return 0;
 }
 
-//static int doRequest(const char* req, unsigned int reqlen, unsigned int* rescode, char* res, unsigned int* reslen)
-//{
-//	std::vector<std::string> cmd;
-//	if (0 != parseReq(req, reqlen, cmd)) 
-//	{
-//		printf("bad request\n");
-//		return -1;
-//	}
-//	if (cmd.size() == 2 && cmdIs(cmd[0], "get")) 
-//	{
-//		*rescode = doGet(cmd, res, reslen);
-//	}
-//	else if (cmd.size() == 3 && cmdIs(cmd[0], "set")) 
-//	{
-//		*rescode = doSet(cmd, res, reslen);
-//	}
-//	else if (cmd.size() == 2 && cmdIs(cmd[0], "del")) 
-//	{
-//		*rescode = doDel(cmd, res, reslen);
-//	}
-//	else 
-//	{
-//		*rescode = RES_ERR;
-//		const char* msg = "Unknown cmd";
-//		strcpy_s(res, _TRUNCATE, msg);
-//		*reslen = strlen(msg);
-//		return 0;
-//	}
-//	return 0;
-//}
-
 static void doRequest(std::vector<std::string>& cmd, std::string& out) 
 {
 	if (cmd.size() == 1 && cmdIs(cmd[0], "keys")) 
@@ -754,6 +783,10 @@ static void stateReq(Conn* conn)
 
 static void connectionIO(Conn* conn) 
 {
+	conn->idle_start = getMonotonicUsec();
+	dListDetach(&conn->idle_list);
+	dListInsertBefore(&g_data.idle_list, &conn->idle_list);
+
 	if (conn->state == STATE_REQ) 
 	{
 		stateReq(conn);
@@ -794,6 +827,9 @@ static int oneRequest(SOCKET socket)
 int main()
 {
 	printf("SERVER START\n");
+
+	dListInit(&g_data.idle_list);
+
 	WSADATA wsaData;
 
 	int iResult;
@@ -855,7 +891,6 @@ int main()
 		return 1;
 	}
 
-	std::vector<Conn*> conns;
 	std::vector<WSAPOLLFD> poll_args;
 
 	while (true)
@@ -864,7 +899,7 @@ int main()
 		WSAPOLLFD pfd = { ListenSocket, POLLRDNORM, 0 };
 		poll_args.push_back(pfd);
 
-		for (Conn* conn : conns)
+		for (Conn* conn : g_data.socket_conn)
 		{
 			if (!conn)
 				continue;
@@ -874,7 +909,9 @@ int main()
 			poll_args.push_back(pfd);
 		}
 
-		iResult = WSAPoll(poll_args.data(), poll_args.size(), 30000);
+		int timeout_ms = (int)nextTimerMs();
+
+		iResult = WSAPoll(poll_args.data(), poll_args.size(), timeout_ms);
 		if (iResult == SOCKET_ERROR)
 		{
 			printf("poll failed: %d\n", WSAGetLastError());
@@ -887,20 +924,20 @@ int main()
 		{
 			if (poll_args[i].revents) 
 			{
-				Conn* conn = conns[poll_args[i].fd];
+				Conn* conn = g_data.socket_conn[poll_args[i].fd];
 				connectionIO(conn);
 				if (conn->state == STATE_END) 
 				{
-					conns[conn->socket] = NULL;
-					closesocket(conn->socket);
-					free(conn);
+					connDone(conn);
 				}
 			}
 		}
 
+		processTimers();
+
 		if (poll_args[0].revents) 
 		{
-			acceptNewConn(conns, ListenSocket);
+			acceptNewConn(ListenSocket);
 		}
 	}
 

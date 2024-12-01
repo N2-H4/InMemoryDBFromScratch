@@ -38,5 +38,11 @@
     <ClInclude Include="ZSet.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="LinkedList.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Timing.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

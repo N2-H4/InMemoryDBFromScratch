@@ -97,6 +97,18 @@ static void treeAdd(ZSet* zset, ZNode* node)
     zset->tree = avlFix(&node->tree);
 }
 
+static void zSetUpdate(ZSet* zset, ZNode* node, double score)
+{
+    if (node->score == score)
+    {
+        return;
+    }
+    zset->tree = avlDel(&node->tree);
+    node->score = score;
+    avlInit(&node->tree);
+    treeAdd(zset, node);
+}
+
 bool zSetAdd(ZSet* zset, const char* name, size_t len, double score) 
 {
     ZNode* node = zSetLookup(zset, name, len);
@@ -112,18 +124,6 @@ bool zSetAdd(ZSet* zset, const char* name, size_t len, double score)
         treeAdd(zset, node);
         return true;
     }
-}
-
-static void zSetUpdate(ZSet* zset, ZNode* node, double score) 
-{
-    if (node->score == score) 
-    {
-        return;
-    }
-    zset->tree = avlDel(&node->tree);
-    node->score = score;
-    avlInit(&node->tree);
-    treeAdd(zset, node);
 }
 
 ZNode* zSetPop(ZSet* zset, const char* name, size_t len) 

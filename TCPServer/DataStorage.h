@@ -26,4 +26,4 @@ void hashMapInsert(HashMap* hmap, Node* node);
 Node* hashMapLookup(HashMap* hmap, Node* key, bool (*eq)(Node*, Node*));
 Node* hashMapPop(HashMap* hmap, Node* key, bool (*eq)(Node*, Node*));
 unsigned long long hashMapSize(HashMap* hmap);
-static void hashMapDestroy(HashMap* hmap);
+void hashMapDestroy(HashMap* hmap);

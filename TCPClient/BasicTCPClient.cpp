@@ -20,6 +20,22 @@ enum
     SER_ARR = 4,    //array
 };
 
+std::vector<std::string> split(std::string s, std::string delimiter) 
+{
+    size_t pos_start = 0, pos_end, delim_len = delimiter.length();
+    std::string token;
+    std::vector<std::string> res;
+
+    while ((pos_end = s.find(delimiter, pos_start)) != std::string::npos) 
+    {
+        token = s.substr(pos_start, pos_end - pos_start);
+        pos_start = pos_end + delim_len;
+        res.push_back(token);
+    }
+    res.push_back(s.substr(pos_start));
+    return res;
+}
+
 static int readFull(SOCKET socket, char* buf, int n)
 {
     while (n > 0)
@@ -277,20 +293,9 @@ int sendAndRecive(SOCKET ConnectSocket)
     } while (iResult > 0);
 }
 
-int sendCmd(SOCKET ConnectSocket, std::string s1, std::string s2, std::string s3)
+int sendCmd(SOCKET ConnectSocket, std::string s)
 {
-    std::vector<std::string> cmd;
-    cmd.push_back(s1);
-    if (s2.length() > 0)
-    {
-        cmd.push_back(s2);
-    }
-    if (s3.length() > 0)
-    {
-        cmd.push_back(s3);
-    }
-
-    int err = sendReq(ConnectSocket, cmd);
+    int err = sendReq(ConnectSocket, split(s," "));
     if (err)
     {
         closesocket(ConnectSocket);
@@ -356,9 +361,9 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    sendCmd(ConnectSocket, "set", "k", "v");
-    sendCmd(ConnectSocket, "get", "k", "");
-    sendCmd(ConnectSocket, "keys", "", "");
+    sendCmd(ConnectSocket, "set k v");
+    sendCmd(ConnectSocket, "get k");
+    sendCmd(ConnectSocket, "keys");
 
     closesocket(ConnectSocket);
     WSACleanup();

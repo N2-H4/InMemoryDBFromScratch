@@ -5,7 +5,6 @@
 #include <vector>
 #include <string>
 #include <map>
-#include "DataStorage.h"
 #include "ZSet.h"
 
 #pragma comment(lib, "Ws2_32.lib")
@@ -84,6 +83,23 @@ struct Conn
 	int wbuf_sent = 0;
 	char wbuf[4 + k_max_msg];
 };
+
+static unsigned long long strHash(const char* data, unsigned long long len)
+{
+	unsigned long long h = 0x811C9DC5;
+	for (unsigned long long i = 0; i < len; i++)
+	{
+		h = (h + data[i]) * 0x01000193;
+	}
+	return h;
+}
+
+static bool entryEq(Node* lhs, Node* rhs)
+{
+	struct Entry* le = container_of(lhs, struct Entry, node);
+	struct Entry* re = container_of(rhs, struct Entry, node);
+	return le->key == re->key;
+}
 
 static int readFull(SOCKET socket, char* buf, int n)
 {
@@ -256,23 +272,6 @@ static bool expectZSet(std::string& out, std::string& s, Entry** ent)
 		return false;
 	}
 	return true;
-}
-
-static unsigned long long strHash(const char* data, unsigned long long len) 
-{
-	unsigned long long h = 0x811C9DC5;
-	for (unsigned long long i = 0; i < len; i++) 
-	{
-		h = (h + data[i]) * 0x01000193;
-	}
-	return h;
-}
-
-static bool entryEq(Node* lhs, Node* rhs) 
-{
-	struct Entry* le = container_of(lhs, struct Entry, node);
-	struct Entry* re = container_of(rhs, struct Entry, node);
-	return le->key == re->key;
 }
 
 static void hScan(HashTable* tab, void (*f)(Node*, void*), void* arg) 
@@ -755,10 +754,12 @@ static void stateReq(Conn* conn)
 
 static void connectionIO(Conn* conn) 
 {
-	if (conn->state == STATE_REQ) {
+	if (conn->state == STATE_REQ) 
+	{
 		stateReq(conn);
 	}
-	else if (conn->state == STATE_RES) {
+	else if (conn->state == STATE_RES) 
+	{
 		stateRes(conn);
 	}
 }
@@ -870,7 +871,6 @@ int main()
 			pollfd pfd = {};
 			pfd.fd = conn->socket;
 			pfd.events = (conn->state == STATE_REQ) ? POLLRDNORM : POLLWRNORM;
-			//pfd.events = pfd.events | POLLERR;
 			poll_args.push_back(pfd);
 		}
 
@@ -883,12 +883,14 @@ int main()
 			return 1;
 		}
 
-		for (int i = 1; i < poll_args.size(); ++i) {
+		for (int i = 1; i < poll_args.size(); ++i) 
+		{
 			if (poll_args[i].revents) 
 			{
 				Conn* conn = conns[poll_args[i].fd];
 				connectionIO(conn);
-				if (conn->state == STATE_END) {
+				if (conn->state == STATE_END) 
+				{
 					conns[conn->socket] = NULL;
 					closesocket(conn->socket);
 					free(conn);

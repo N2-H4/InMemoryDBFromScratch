@@ -128,7 +128,7 @@ unsigned long long hashMapSize(HashMap* hmap)
     return hmap->ht1.size + hmap->ht2.size;
 }
 
-static void hashMapDestroy(HashMap* hmap) 
+void hashMapDestroy(HashMap* hmap) 
 {
     free(hmap->ht1.tab);
     free(hmap->ht2.tab);

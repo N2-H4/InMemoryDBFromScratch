@@ -1,20 +1,11 @@
 #include "AVLTree.h"
 
-struct AVLNode 
-{
-    unsigned int depth = 0;
-    unsigned int cnt = 0;
-    AVLNode* left = nullptr;
-    AVLNode* right = nullptr;
-    AVLNode* parent = nullptr;
-};
-
 static unsigned int max(unsigned int lhs, unsigned int rhs) 
 {
     return lhs < rhs ? rhs : lhs;
 }
 
-static void avlInit(AVLNode* node) 
+void avlInit(AVLNode* node) 
 {
     node->depth = 1;
     node->cnt = 1;
@@ -87,7 +78,7 @@ static AVLNode* avlFixRight(AVLNode* root)
     return rotLeft(root);
 }
 
-static AVLNode* avlFix(AVLNode* node) 
+AVLNode* avlFix(AVLNode* node) 
 {
     while (true) 
     {
@@ -116,7 +107,7 @@ static AVLNode* avlFix(AVLNode* node)
     }
 }
 
-static AVLNode* avlDel(AVLNode* node) 
+AVLNode* avlDel(AVLNode* node) 
 {
     if (node->right == nullptr)
     {

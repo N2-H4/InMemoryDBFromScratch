@@ -13,11 +13,12 @@ const int k_max_msg = 4096;
 
 enum
 {
-    SER_NULL = 0,    //null
+    SER_NULL = 0,   //null
     SER_ERR = 1,    //error code and message
     SER_STR = 2,    //string
     SER_INT = 3,    //int
     SER_ARR = 4,    //array
+    SER_DBL = 5,	//double
 };
 
 std::vector<std::string> split(std::string s, std::string delimiter) 
@@ -152,6 +153,17 @@ static int onResponse(const unsigned char* data, size_t size)
             printf("(int) %ld\n", (int)val);
             return 1 + 8;
         }
+    case SER_DBL:
+        if (size < 1 + 8) {
+            printf("bad response\n");
+            return -1;
+        }
+        {
+            double val = 0;
+            memcpy(&val, &data[1], 8);
+            printf("(dbl) %g\n", val);
+            return 1 + 8;
+        }
     case SER_ARR:
         if (size < 1 + 4) 
         {
@@ -186,7 +198,6 @@ static int onResponse(const unsigned char* data, size_t size)
 static int readRes(SOCKET socket) 
 {
     char rbuf[4 + k_max_msg + 1];
-    errno = 0;
     int err = readFull(socket, rbuf, 4);
     if (err) 
     {
@@ -361,9 +372,18 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    sendCmd(ConnectSocket, "set k v");
-    sendCmd(ConnectSocket, "get k");
-    sendCmd(ConnectSocket, "keys");
+    sendCmd(ConnectSocket, "zscore asdf n1");
+    sendCmd(ConnectSocket, "zquery xxx 1 asdf 1 10");
+    sendCmd(ConnectSocket, "zadd zset 1 n1");
+    sendCmd(ConnectSocket, "zadd zset 2 n2");
+    sendCmd(ConnectSocket, "zadd zset 1.1 n1");
+    sendCmd(ConnectSocket, "zscore zset n1");
+    sendCmd(ConnectSocket, "zquery zset 1 \"\" 0 10");
+    sendCmd(ConnectSocket, "zquery zset 1.1 \"\" 2 10");
+    sendCmd(ConnectSocket, "zrem zset adsf");
+    sendCmd(ConnectSocket, "zrem zset n1");
+    sendCmd(ConnectSocket, "zquery zset 1 \"\" 0 10");
+
 
     closesocket(ConnectSocket);
     WSACleanup();

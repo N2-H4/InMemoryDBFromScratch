@@ -653,6 +653,11 @@ static bool tryFlushBuffer(Conn* conn)
 		conn->state = STATE_END;
 		return false;
 	}
+
+	conn->idle_start = getMonotonicUsec();
+	dListDetach(&conn->idle_list);
+	dListInsertBefore(&g_data.idle_list, &conn->idle_list);
+
 	conn->wbuf_sent += (size_t)rv;
 	if (conn->wbuf_sent > conn->wbuf_size)
 	{
@@ -763,6 +768,10 @@ static bool tryFillBuffer(Conn* conn)
 		return false;
 	}
 
+	conn->idle_start = getMonotonicUsec();
+	dListDetach(&conn->idle_list);
+	dListInsertBefore(&g_data.idle_list, &conn->idle_list);
+
 	conn->rbuf_size += rv;
 
 	if (conn->rbuf_size > sizeof(conn->rbuf))
@@ -783,10 +792,6 @@ static void stateReq(Conn* conn)
 
 static void connectionIO(Conn* conn) 
 {
-	conn->idle_start = getMonotonicUsec();
-	dListDetach(&conn->idle_list);
-	dListInsertBefore(&g_data.idle_list, &conn->idle_list);
-
 	if (conn->state == STATE_REQ) 
 	{
 		stateReq(conn);
@@ -835,7 +840,8 @@ int main()
 	int iResult;
 
 	iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
-	if (iResult != 0) {
+	if (iResult != 0) 
+	{
 		printf("WSAStartup failed: %d\n", iResult);
 		return 1;
 	}
@@ -849,7 +855,8 @@ int main()
 	hints.ai_flags = AI_PASSIVE;
 
 	iResult = getaddrinfo(NULL, DEFAULT_PORT, &hints, &result);
-	if (iResult != 0) {
+	if (iResult != 0) 
+	{
 		printf("getaddrinfo failed: %d\n", iResult);
 		WSACleanup();
 		return 1;
@@ -858,7 +865,8 @@ int main()
 	SOCKET ListenSocket = INVALID_SOCKET;
 	ListenSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
 
-	if (ListenSocket == INVALID_SOCKET) {
+	if (ListenSocket == INVALID_SOCKET) 
+	{
 		printf("Error at socket(): %ld\n", WSAGetLastError());
 		freeaddrinfo(result);
 		WSACleanup();
@@ -867,7 +875,8 @@ int main()
 
 	unsigned long mode = 1;
 	iResult = ioctlsocket(ListenSocket, FIONBIO, &mode);
-	if (iResult == SOCKET_ERROR) {
+	if (iResult == SOCKET_ERROR) 
+	{
 		printf("Error at setting nonblocking io: %ld\n", WSAGetLastError());
 		freeaddrinfo(result);
 		closesocket(ListenSocket);
@@ -876,7 +885,8 @@ int main()
 	}
 
 	iResult = bind(ListenSocket, result->ai_addr, (int)result->ai_addrlen);
-	if (iResult == SOCKET_ERROR) {
+	if (iResult == SOCKET_ERROR) 
+	{
 		printf("bind failed with error: %d\n", WSAGetLastError());
 		freeaddrinfo(result);
 		closesocket(ListenSocket);
@@ -884,7 +894,8 @@ int main()
 		return 1;
 	}
 
-	if (listen(ListenSocket, SOMAXCONN) == SOCKET_ERROR) {
+	if (listen(ListenSocket, SOMAXCONN) == SOCKET_ERROR) 
+	{
 		printf("Listen failed with error: %ld\n", WSAGetLastError());
 		closesocket(ListenSocket);
 		WSACleanup();

@@ -8,6 +8,7 @@
 #include "ZSet.h"
 #include "LinkedList.h"
 #include "Timing.h"
+#include "Heap.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -66,6 +67,7 @@ struct Entry
 	std::string val;
 	unsigned int type = 0;
 	ZSet* zset = NULL;
+	size_t heap_idx = -1;
 };
 
 struct Conn
@@ -87,6 +89,7 @@ static struct
 	HashMap db;
 	std::vector<Conn*> socket_conn;
 	DList idle_list;
+	std::vector<HeapItem> heap;
 } g_data;
 
 static std::map<std::string, std::string> g_map;
@@ -100,14 +103,25 @@ static unsigned long long getMonotonicUsec()
 
 static unsigned int nextTimerMs()
 {
-	if (dListEmpty(&g_data.idle_list))
+	unsigned long long now_us = getMonotonicUsec();
+	unsigned long long next_us = (unsigned long long)-1;
+
+	if (!dListEmpty(&g_data.idle_list)) 
+	{
+		Conn* next = container_of(g_data.idle_list.next, Conn, idle_list);
+		next_us = next->idle_start + k_idle_timeout_ms * 1000;
+	}
+
+	if (!g_data.heap.empty() && g_data.heap[0].val < next_us) 
+	{
+		next_us = g_data.heap[0].val;
+	}
+
+	if (next_us == (unsigned long long)-1) 
 	{
 		return 10000;
 	}
 
-	unsigned long long now_us = getMonotonicUsec();
-	Conn* next = container_of(g_data.idle_list.next, Conn, idle_list);
-	unsigned long long next_us = next->idle_start + k_idle_timeout_ms * 1000;
 	if (next_us <= now_us) 
 	{
 		return 0;
@@ -124,10 +138,56 @@ static void connDone(Conn* conn)
 	free(conn);
 }
 
-static void processTimers() 
+static void entrySetTtl(Entry* ent, long long ttl_ms) 
+{
+	if (ttl_ms < 0 && ent->heap_idx != (size_t)-1) 
+	{
+		size_t pos = ent->heap_idx;
+		g_data.heap[pos] = g_data.heap.back();
+		g_data.heap.pop_back();
+		if (pos < g_data.heap.size()) 
+		{
+			heapUpdate(g_data.heap.data(), pos, g_data.heap.size());
+		}
+		ent->heap_idx = -1;
+	}
+	else if (ttl_ms >= 0) 
+	{
+		size_t pos = ent->heap_idx;
+		if (pos == (size_t)-1) 
+		{
+			HeapItem item;
+			item.ref = &ent->heap_idx;
+			g_data.heap.push_back(item);
+			pos = g_data.heap.size() - 1;
+		}
+		g_data.heap[pos].val = getMonotonicUsec() + (unsigned long long)ttl_ms * 1000;
+		heapUpdate(g_data.heap.data(), pos, g_data.heap.size());
+	}
+}
+
+static void entryDel(Entry* ent) 
+{
+	switch (ent->type) 
+	{
+		case T_ZSET:
+			zSetDispose(ent->zset);
+			delete ent->zset;
+			break;
+	}
+	entrySetTtl(ent, -1);
+	delete ent;
+}
+
+static bool nodeEq(Node* lhs, Node* rhs)
+{
+	return lhs == rhs;
+}
+
+static void processTimers()
 {
 	unsigned long long now_us = getMonotonicUsec();
-	while (!dListEmpty(&g_data.idle_list)) 
+	while (!dListEmpty(&g_data.idle_list))
 	{
 		Conn* next = container_of(g_data.idle_list.next, Conn, idle_list);
 		unsigned long long next_us = next->idle_start + k_idle_timeout_ms * 1000;
@@ -138,6 +198,23 @@ static void processTimers()
 
 		printf("removing idle connection: %d\n", (int)next->socket);
 		connDone(next);
+	}
+
+	const size_t k_max_works = 2000;
+	size_t nworks = 0;
+	while (!g_data.heap.empty() && g_data.heap[0].val < now_us)
+	{
+		Entry* ent = container_of(g_data.heap[0].ref, Entry, heap_idx);
+		Node* node = hashMapPop(&g_data.db, &ent->node, &nodeEq);
+		if (node != &ent->node)
+		{
+			continue;
+		}
+		entryDel(ent);
+		if (nworks++ >= k_max_works)
+		{
+			break;
+		}
 	}
 }
 
@@ -554,6 +631,50 @@ static void doZScore(std::vector<std::string>& cmd, std::string& out)
 	return znode ? outDbl(out, znode->score) : outNull(out);
 }
 
+static void doExpire(std::vector<std::string>& cmd, std::string& out) 
+{
+	long long ttl_ms = 0;
+	if (!str2int(cmd[2], ttl_ms)) 
+	{
+		return outErr(out, ERR_ARG, "expect int");
+	}
+
+	Entry key;
+	key.key.swap(cmd[1]);
+	key.node.hash_code = strHash(key.key.data(), key.key.size());
+
+	Node* node = hashMapLookup(&g_data.db, &key.node, &entryEq);
+	if (node) 
+	{
+		Entry* ent = container_of(node, Entry, node);
+		entrySetTtl(ent, ttl_ms);
+	}
+	return outInt(out, node ? 1 : 0);
+}
+
+static void doTtl(std::vector<std::string>& cmd, std::string& out) 
+{
+	Entry key;
+	key.key.swap(cmd[1]);
+	key.node.hash_code = strHash(key.key.data(), key.key.size());
+
+	Node* node = hashMapLookup(&g_data.db, &key.node, &entryEq);
+	if (!node) 
+	{
+		return outInt(out, -2);
+	}
+
+	Entry* ent = container_of(node, Entry, node);
+	if (ent->heap_idx == (size_t)-1) 
+	{
+		return outInt(out, -1);
+	}
+
+	unsigned long long expire_at = g_data.heap[ent->heap_idx].val;
+	unsigned long long now_us = getMonotonicUsec();
+	return outInt(out, expire_at > now_us ? (expire_at - now_us) / 1000 : 0);
+}
+
 
 static bool cmdIs(const std::string& word, const char* cmd) 
 {
@@ -615,6 +736,14 @@ static void doRequest(std::vector<std::string>& cmd, std::string& out)
 	else if (cmd.size() == 2 && cmdIs(cmd[0], "del")) 
 	{
 		doDel(cmd, out);
+	}
+	else if (cmd.size() == 3 && cmdIs(cmd[0], "expire")) 
+	{
+		doExpire(cmd, out);
+	}
+	else if (cmd.size() == 2 && cmdIs(cmd[0], "ttl"))
+	{
+		doTtl(cmd, out);
 	}
 	else if (cmd.size() == 4 && cmdIs(cmd[0], "zadd")) 
 	{

@@ -131,6 +131,7 @@
     <ClCompile Include="AVLTree.cpp" />
     <ClCompile Include="DataStorage.cpp" />
     <ClCompile Include="Heap.cpp" />
+    <ClCompile Include="ThreadPool.cpp" />
     <ClCompile Include="ZSet.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -138,6 +139,7 @@
     <ClInclude Include="DataStorage.h" />
     <ClInclude Include="Heap.h" />
     <ClInclude Include="LinkedList.h" />
+    <ClInclude Include="ThreadPool.h" />
     <ClInclude Include="Timing.h" />
     <ClInclude Include="ZSet.h" />
   </ItemGroup>

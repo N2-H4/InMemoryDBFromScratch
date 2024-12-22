@@ -372,7 +372,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    sendCmd(ConnectSocket, "zscore asdf n1");
+    /*sendCmd(ConnectSocket, "zscore asdf n1");
     sendCmd(ConnectSocket, "zquery xxx 1 asdf 1 10");
     sendCmd(ConnectSocket, "zadd zset 1 n1");
     sendCmd(ConnectSocket, "zadd zset 2 n2");
@@ -382,6 +382,20 @@ int main(int argc, char** argv)
     sendCmd(ConnectSocket, "zquery zset 1.1 \"\" 2 10");
     sendCmd(ConnectSocket, "zrem zset adsf");
     sendCmd(ConnectSocket, "zrem zset n1");
+    sendCmd(ConnectSocket, "zquery zset 1 \"\" 0 10");
+    sendCmd(ConnectSocket, "zadd zset 1 n1");
+    sendCmd(ConnectSocket, "zadd zset 2 n2");
+    sendCmd(ConnectSocket, "zadd zset 3 n3");
+    sendCmd(ConnectSocket, "zadd zset 4 n4");
+    sendCmd(ConnectSocket, "zquery zset 1 \"\" 0 10");*/
+
+    sendCmd(ConnectSocket, "zadd zset 1 n1");
+    sendCmd(ConnectSocket, "zadd zset 2 n2");
+    sendCmd(ConnectSocket, "zadd zset 3 n3");
+    sendCmd(ConnectSocket, "zadd zset 4 n4");
+    sendCmd(ConnectSocket, "zquery zset 1 \"\" 0 10");
+    sendCmd(ConnectSocket, "expire zset 1");
+    Sleep(1000);
     sendCmd(ConnectSocket, "zquery zset 1 \"\" 0 10");
 
     closesocket(ConnectSocket);

@@ -9,6 +9,7 @@
 #include "LinkedList.h"
 #include "Timing.h"
 #include "Heap.h"
+#include "ThreadPool.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -90,6 +91,7 @@ static struct
 	std::vector<Conn*> socket_conn;
 	DList idle_list;
 	std::vector<HeapItem> heap;
+	ThreadPool thread_pool;
 } g_data;
 
 static std::map<std::string, std::string> g_map;
@@ -138,6 +140,13 @@ static void connDone(Conn* conn)
 	free(conn);
 }
 
+static bool entryEq(Node* lhs, Node* rhs)
+{
+	struct Entry* le = container_of(lhs, struct Entry, node);
+	struct Entry* re = container_of(rhs, struct Entry, node);
+	return le->key == re->key;
+}
+
 static void entrySetTtl(Entry* ent, long long ttl_ms) 
 {
 	if (ttl_ms < 0 && ent->heap_idx != (size_t)-1) 
@@ -166,17 +175,49 @@ static void entrySetTtl(Entry* ent, long long ttl_ms)
 	}
 }
 
-static void entryDel(Entry* ent) 
+static void entryDestroy(Entry* ent)
 {
-	switch (ent->type) 
+	if (ent == NULL)
+	{
+		return;
+	}
+
+	switch (ent->type)
 	{
 		case T_ZSET:
 			zSetDispose(ent->zset);
 			delete ent->zset;
 			break;
 	}
-	entrySetTtl(ent, -1);
 	delete ent;
+}
+
+static void entryDelAsync(void* arg)
+{
+	entryDestroy((Entry*)arg);
+}
+
+
+static void entryDel(Entry* ent) 
+{
+	entrySetTtl(ent, -1);
+	const size_t k_large_container_size = 10000;
+	bool too_big = false;
+	switch (ent->type) 
+	{
+		case T_ZSET:
+			too_big = hashMapSize(&ent->zset->hmap) > k_large_container_size;
+			break;
+	}
+
+	if (too_big) 
+	{
+		threadPoolSubmitWork(&g_data.thread_pool, &entryDelAsync, ent);
+	}
+	else 
+	{
+		entryDestroy(ent);
+	}
 }
 
 static bool nodeEq(Node* lhs, Node* rhs)
@@ -226,13 +267,6 @@ static unsigned long long strHash(const char* data, unsigned long long len)
 		h = (h + data[i]) * 0x01000193;
 	}
 	return h;
-}
-
-static bool entryEq(Node* lhs, Node* rhs)
-{
-	struct Entry* le = container_of(lhs, struct Entry, node);
-	struct Entry* re = container_of(rhs, struct Entry, node);
-	return le->key == re->key;
 }
 
 static int readFull(SOCKET socket, char* buf, int n)
@@ -525,18 +559,6 @@ static void doZAdd(std::vector<std::string>& cmd, std::string& out)
 	const std::string& name = cmd[3];
 	bool added = zSetAdd(ent->zset, name.data(), name.size(), score);
 	return outInt(out, (int)added);
-}
-
-static void entryDel(Entry* ent) 
-{
-	switch (ent->type) 
-	{
-	case T_ZSET:
-		zSetDispose(ent->zset);
-		delete ent->zset;
-		break;
-	}
-	delete ent;
 }
 
 static void doDel(std::vector<std::string>& cmd, std::string& out)
@@ -963,6 +985,7 @@ int main()
 	printf("SERVER START\n");
 
 	dListInit(&g_data.idle_list);
+	threadPoolInit(&g_data.thread_pool);
 
 	WSADATA wsaData;
 
@@ -1081,6 +1104,7 @@ int main()
 		}
 	}
 
+	//threadPoolCleanup(g_data.thread_pool);
 	closesocket(ListenSocket);
 	WSACleanup();
 

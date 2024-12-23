@@ -609,6 +609,7 @@ static void doZQuery(std::vector<std::string>& cmd, std::string& out)
 	{
 		return outArr(out, 0);
 	}
+
 	ZNode* znode = zSetQuery(ent->zset, score, name.data(), name.size());
 	znode = zNodeOffset(znode, offset);
 
@@ -623,6 +624,57 @@ static void doZQuery(std::vector<std::string>& cmd, std::string& out)
 	}
 	endArr(out, arr, n);
 }
+
+static void doZQueryDesc(std::vector<std::string>& cmd, std::string& out)
+{
+	double score = 0;
+	if (!str2dbl(cmd[2], score))
+	{
+		return outErr(out, ERR_ARG, "expect fp number");
+	}
+	const std::string& name = cmd[3];
+	long long offset = 0;
+	long long limit = 0;
+	if (!str2int(cmd[4], offset))
+	{
+		return outErr(out, ERR_ARG, "expect int");
+	}
+	if (!str2int(cmd[5], limit))
+	{
+		return outErr(out, ERR_ARG, "expect int");
+	}
+
+	Entry* ent = NULL;
+	if (!expectZSet(out, cmd[1], &ent))
+	{
+		if (out[0] == SER_NULL)
+		{
+			out.clear();
+			outArr(out, 0);
+		}
+		return;
+	}
+
+	if (limit <= 0)
+	{
+		return outArr(out, 0);
+	}
+
+	ZNode* znode = zSetQueryDesc(ent->zset, score, name.data(), name.size());
+	znode = zNodeOffset(znode, offset);
+
+	void* arr = beginArr(out);
+	unsigned int n = 0;
+	while (znode && (long long)n < limit)
+	{
+		outStr(out, znode->name, znode->len);
+		outDbl(out, znode->score);
+		znode = zNodeOffset(znode, -1);
+		n += 2;
+	}
+	endArr(out, arr, n);
+}
+
 static void doZRem(std::vector<std::string>& cmd, std::string& out) 
 {
 	Entry* ent = NULL;
@@ -782,6 +834,10 @@ static void doRequest(std::vector<std::string>& cmd, std::string& out)
 	else if (cmd.size() == 6 && cmdIs(cmd[0], "zquery")) 
 	{
 		doZQuery(cmd, out);
+	}
+	else if (cmd.size() == 6 && cmdIs(cmd[0], "zquerydesc"))
+	{
+		doZQueryDesc(cmd, out);
 	}
 	else 
 	{

@@ -25,6 +25,7 @@ bool zSetAdd(ZSet* zset, const char* name, size_t len, double score);
 ZNode* zSetLookup(ZSet* zset, const char* name, size_t len);
 ZNode* zSetPop(ZSet* zset, const char* name, size_t len);
 ZNode* zSetQuery(ZSet* zset, double score, const char* name, size_t len);
+ZNode* zSetQueryDesc(ZSet* zset, double score, const char* name, size_t len);
 void zSetDispose(ZSet* zset);
 ZNode* zNodeOffset(ZNode* node, long long offset);
 void zNodeDel(ZNode* node);

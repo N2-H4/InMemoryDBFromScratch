@@ -154,7 +154,7 @@ void zNodeDel(ZNode* node)
 ZNode* zSetQuery(ZSet* zset, double score, const char* name, size_t len) 
 {
     AVLNode* found = NULL;
-    for (AVLNode* cur = zset->tree; cur; ) 
+    for (AVLNode* cur = zset->tree; cur;) 
     {
         if (zless(cur, score, name, len)) 
         {
@@ -163,6 +163,24 @@ ZNode* zSetQuery(ZSet* zset, double score, const char* name, size_t len)
         else 
         {
             found = cur;
+            cur = cur->left;
+        }
+    }
+    return found ? container_of(found, ZNode, tree) : NULL;
+}
+
+ZNode* zSetQueryDesc(ZSet* zset, double score, const char* name, size_t len)
+{
+    AVLNode* found = NULL;
+    for (AVLNode* cur = zset->tree; cur;)
+    {
+        if (zless(cur, score, name, len))
+        {
+            found = cur;
+            cur = cur->right;
+        }
+        else
+        {
             cur = cur->left;
         }
     }

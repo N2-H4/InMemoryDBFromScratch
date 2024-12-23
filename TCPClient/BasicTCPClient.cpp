@@ -389,14 +389,11 @@ int main(int argc, char** argv)
     sendCmd(ConnectSocket, "zadd zset 4 n4");
     sendCmd(ConnectSocket, "zquery zset 1 \"\" 0 10");*/
 
-    sendCmd(ConnectSocket, "zadd zset 1 n1");
-    sendCmd(ConnectSocket, "zadd zset 2 n2");
+    sendCmd(ConnectSocket, "zadd zset 3 n1");
+    sendCmd(ConnectSocket, "zadd zset 3 n2");
     sendCmd(ConnectSocket, "zadd zset 3 n3");
     sendCmd(ConnectSocket, "zadd zset 4 n4");
-    sendCmd(ConnectSocket, "zquery zset 1 \"\" 0 10");
-    sendCmd(ConnectSocket, "expire zset 1");
-    Sleep(1000);
-    sendCmd(ConnectSocket, "zquery zset 1 \"\" 0 10");
+    sendCmd(ConnectSocket, "zquerydesc zset 3 n3 0 10");
 
     closesocket(ConnectSocket);
     WSACleanup();
